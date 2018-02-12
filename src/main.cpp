@@ -205,9 +205,9 @@ int main() {
   int lane = 1;
 
   // define reference velocity (smaller by 0.5 km/h to avoid crossing of 50km/h speed limit)
-  double ref_vel = 49.5; // in km/h
+  double ref_vel = 0.0; // in km/h
 
-  h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  h.onMessage([&lane, &ref_vel, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -245,6 +245,63 @@ int main() {
           	auto sensor_fusion = j[1]["sensor_fusion"];
 
             int prev_size = previous_path_x.size();
+
+            // process the sensor fusion to avoid collisions with the cars
+            if(prev_size > 0){
+              car_s = end_path_s;
+            }
+
+            bool too_close = false;
+
+            //find the ref_v to use
+            for(int i=0; i < sensor_fusion.size(); i++){
+
+              
+              float d = sensor_fusion[i][6];
+              
+              // check if the current car is in the ego lane
+              if((d > 4*lane) && (d < (4 + 4*lane))){
+
+                double vx = sensor_fusion[i][3];
+                double vy = sensor_fusion[i][4];
+                double check_speed = sqrt(vx*vx + vy*vy);
+                double check_car_s = sensor_fusion[i][5];
+
+                // project s values
+                check_car_s += ((double)prev_size * .02 * check_speed);
+
+                // if car is infornt of ego and is closer then 30m
+                if((check_car_s > car_s) && ((check_car_s-car_s) < 30)){
+
+                  // reduce ego velocity
+                  //ref_vel = 29.5; //km/h
+                  too_close = true;
+
+                  // TODO: check if the car in the lane is in the gap 
+
+                  // TODO: add a cost function 
+                  // check jerk
+                  // check acceleration
+
+                  // TODO: final state machin what maneuver to take
+
+                  // check if we are in the left lane already and do the lane change
+                  if(lane > 0){
+                    lane= 0;
+                  }
+                }
+              }
+            }
+
+            if(too_close){
+
+              ref_vel -= .224; // decel 5 m/s^2
+            }
+            else if(ref_vel < 49.5){ // km/h
+
+              ref_vel += .224; // accel 5 m/s^2
+            } 
+
 
             // list of points spaced at 30m for spline interpolation
             vector<double> ptsx;
@@ -299,7 +356,7 @@ int main() {
             ptsy.push_back(next_wp1[1]);
             ptsy.push_back(next_wp2[1]);
             
-            // translate the coordinate system
+            // translate the coordinate system to avoid vertical case in spline smoothed path
             for (int i = 0; i < ptsx.size(); i++){
 
                
