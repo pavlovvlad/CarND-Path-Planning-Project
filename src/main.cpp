@@ -11,6 +11,8 @@
 #include "spline.h"
 
 using namespace std;
+using Eigen::MatrixXd;
+using Eigen::VectorXd;
 
 // for convenience
 using json = nlohmann::json;
@@ -164,6 +166,56 @@ vector<double> getXY(double s, double d, const vector<double> &maps_s, const vec
 
 }
 
+vector<double> JMT(vector< double> start, vector <double> end, double T)
+{
+  /*
+  Calculate the Jerk Minimizing Trajectory that connects the initial state
+  to the final state in time T.
+
+  INPUTS
+
+  start - the vehicles start location given as a length three array
+      corresponding to initial values of [s, s_dot, s_double_dot]
+
+  end   - the desired end state for vehicle. Like "start" this is a
+      length three array.
+
+  T     - The duration, in seconds, over which this maneuver should occur.
+
+  OUTPUT 
+  an array of length 6, each value corresponding to a coefficent in the polynomial 
+  s(t) = a_0 + a_1 * t + a_2 * t**2 + a_3 * t**3 + a_4 * t**4 + a_5 * t**5
+
+  EXAMPLE
+
+  > JMT( [0, 10, 0], [10, 10, 0], 1)
+  [0.0, 10.0, 0.0, 0.0, 0.0, 0.0]
+  */
+  
+  MatrixXd A = MatrixXd(3, 3);
+  A << T*T*T, T*T*T*T, T*T*T*T*T,
+          3*T*T, 4*T*T*T,5*T*T*T*T,
+          6*T, 12*T*T, 20*T*T*T;
+    
+  MatrixXd B = MatrixXd(3,1);     
+  B << end[0]-(start[0]+start[1]*T+.5*start[2]*T*T),
+          end[1]-(start[1]+start[2]*T),
+          end[2]-start[2];
+          
+  MatrixXd Ai = A.inverse();
+  
+  MatrixXd C = Ai*B;
+  
+  vector <double> result = {start[0], start[1], .5*start[2]};
+  for(int i = 0; i < C.size(); i++)
+  {
+      result.push_back(C.data()[i]);
+  }
+  
+    return result;
+    
+}
+
 int main() {
   uWS::Hub h;
 
@@ -242,6 +294,7 @@ int main() {
           	double end_path_d = j[1]["end_path_d"];
 
           	// Sensor Fusion Data, a list of all other cars on the same side of the road.
+            // data format for each car is: [ id, x, y, vx, vy, s, d].
           	auto sensor_fusion = j[1]["sensor_fusion"];
 
             int prev_size = previous_path_x.size();
@@ -277,10 +330,30 @@ int main() {
                   //ref_vel = 29.5; //km/h
                   too_close = true;
 
-                  // TODO: check if the car in the lane is in the gap 
+                  // TODO: check if the car in the lane to change is in the gap 
 
-                  // TODO: add a cost function 
-                  // check jerk
+                  // TODO:calculate trajectories
+
+                  // TODO: add a cost functions 
+                  // check max and min velocity
+                  // check max and min acceleration
+                  /*
+                      (time_diff_cost,    1),
+                      (s_diff_cost,       1),
+                      (d_diff_cost,       1),
+                      (efficiency_cost,   1),
+                      (max_jerk_cost,     1),
+                      (total_jerk_cost,   1),
+                      (collision_cost,    1),
+                      (buffer_cost,       1),
+                      (max_accel_cost,    1),
+                      (total_accel_cost,  1),
+                  */
+                  // check steering angle
+
+                  // check minimal jerk (JMT) Quintic Polynomial Solver
+                  vector< double > s_coeff = JMT(traj_s[i].start, traj_s[i].end, traj_s[i].T);
+                  vector< double > d_coeff = JMT(traj_d[i].start, traj_d[i].end, traj_d[i].T);
                   // check acceleration
 
                   // TODO: final state machin what maneuver to take
@@ -381,7 +454,7 @@ int main() {
               next_y_vals.push_back(previous_path_y[i]);
             }
 
-            // calculate
+            // calculate reference point and distance to it
             double target_x = 30.0;
             double target_y = s(target_x);
             double target_dist = sqrt(target_x*target_x + target_y*target_y);
